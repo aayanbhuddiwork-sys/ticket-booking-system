@@ -7,7 +7,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "db:init": "node db/init.js"
+    "db:init": "node db/init.js",
+    "consumer:notify": "node src/consumers/notification.consumer.js",
+    "consumer:ticket": "node src/consumers/ticket-gen.consumer.js",
+    "consumer:audit": "node src/consumers/audit-log.consumer.js"
   },
   "dependencies": {
   "bcryptjs": "^2.4.3",
@@ -16,7 +19,8 @@
   "express": "^4.19.2",
   "ioredis": "^5.4.1",
   "jsonwebtoken": "^9.0.2",
-  "pg": "^8.12.0"
+  "pg": "^8.12.0",
+  "kafkajs": "^2.2.4"
 },
   "devDependencies": {
     "nodemon": "^3.1.4"

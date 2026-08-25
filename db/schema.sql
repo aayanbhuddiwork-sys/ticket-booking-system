@@ -51,3 +51,15 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE INDEX IF NOT EXISTS idx_seats_event_id ON seats(event_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_event_id ON bookings(event_id);
+
+
+-- Phase 3: written to by the Kafka audit-log consumer, independently of
+-- the booking request itself.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          SERIAL PRIMARY KEY,
+    event_type  VARCHAR(50) NOT NULL,
+    booking_id  INTEGER,
+    user_id     INTEGER,
+    details     JSONB,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const redis = require('../config/redis');
+const { publishBookingConfirmed } = require('../config/kafka');
 
 const HOLD_SECONDS = 180; // 3 minute reservation window, same idea as a movie-ticket countdown
 
@@ -92,7 +93,26 @@ async function confirmBooking(req, res) {
 
       await client.query('COMMIT');
 
-      await redis.del(key);
+      await redis.del(key); // release the temporary hold — seat is now permanently booked
+
+      // PHASE 3: publish the event AFTER the DB commit succeeds (so we
+      // never announce a booking that didn't actually save), but we don't
+      // make the user wait for any consumer to process it — this is
+      // fire-and-forget from the request's point of view.
+      try {
+        await publishBookingConfirmed({
+          bookingId: booking.id,
+          userId,
+          eventId,
+          seatId,
+          amount: seatRows[0].price,
+          confirmedAt: new Date().toISOString(),
+        });
+      } catch (kafkaErr) {
+        // A Kafka publish failure should never fail the booking itself —
+        // the booking already committed successfully. Just log it.
+        console.error('Failed to publish booking.confirmed event:', kafkaErr);
+      }
 
       res.status(201).json({ booking, message: 'Payment confirmed, seat booked' });
     } catch (err) {
