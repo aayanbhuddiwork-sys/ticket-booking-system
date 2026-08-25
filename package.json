@@ -1,0 +1,23 @@
+{
+  "name": "event-ticket-booking-system",
+  "version": "1.0.0",
+  "description": "Real-Time Event Ticket Booking System with Anti-Oversell Protection (Phase 1: core booking, DB only)",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "db:init": "node db/init.js"
+  },
+  "dependencies": {
+  "bcryptjs": "^2.4.3",
+  "cors": "^2.8.5",
+  "dotenv": "^16.4.5",
+  "express": "^4.19.2",
+  "jsonwebtoken": "^9.0.2",
+  "pg": "^8.12.0"
+},
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
