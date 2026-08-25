@@ -1,87 +1,58 @@
-# Real-Time Event Ticket Booking System — Phase 1
+# Real-Time Event Ticket Booking System
 
-Core booking system: auth, events, seats, bookings. Runs on PostgreSQL only —
-no Redis or Kafka yet (those come in Phase 2 and Phase 3).
+A backend that prevents overselling limited event tickets — the same
+problem platforms like Flipkart or Amazon face when many people try to buy
+the same limited-stock item at once. If two users try to book the same seat
+at the exact same moment, only one should ever win.
 
-## Anti-oversell strategy in this phase
+## Phase 1 — PostgreSQL row-level locking
 
-There's no Redis lock yet, so concurrency safety comes from PostgreSQL's
-row-level locking: `SELECT ... FOR UPDATE` inside a transaction (see
-`bookSeat` in `src/controllers/bookings.controller.js`). Two simultaneous
-requests for the same seat serialize on that row lock — one wins, the other
-gets a clean 409 "seat unavailable". This is functionally correct but holds
-a DB connection open for the whole booking + mock-payment step, which is
-exactly the bottleneck Phase 2's Redis lock (SETNX/Lua + TTL) is designed
-to remove. Worth remembering as a talking point later.
+Built the core system first: auth, events, seats, bookings, backed entirely
+by PostgreSQL. To stop two people from booking the same seat, every booking
+runs inside a database transaction using `SELECT ... FOR UPDATE` — this
+locks that specific seat's row until the transaction finishes. If two
+requests hit the same seat at once, the second one is forced to wait, then
+sees the seat's already booked and gets rejected cleanly.
 
-## Setup
+This is correct and I tested it — including with two genuinely separate
+user accounts trying to grab the same seat. But it has a real limitation:
+the database connection stays open for the whole booking + payment flow,
+which doesn't scale well if thousands of people are competing for the same
+seats at once (a real flash-sale scenario).
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+## Phase 2 — Redis locks with auto-expiry
 
-2. Create a PostgreSQL database:
-   ```bash
-   createdb ticket_booking
-   ```
+That limitation is exactly why Phase 2 exists. Instead of locking a
+database row for the whole flow, the app now grabs a lock in Redis
+*before* payment even starts — `SET key value NX EX 180`. `NX` means Redis
+only lets one request ever successfully create that lock; `EX 180` means
+the lock auto-expires after 3 minutes if someone abandons checkout, so
+there's no manual cleanup needed. Only once payment is confirmed does the
+app write anything permanent to the database and release the lock.
 
-3. Copy `.env.example` to `.env` and fill in your DB credentials + a JWT secret:
-   ```bash
-   cp .env.example .env
-   ```
+Same guarantee as Phase 1 — no seat is ever double-booked — but the lock
+is grabbed and released fast, and the database is never touched until
+there's an actual confirmed sale.
 
-4. Initialize the schema and seed a demo event (10 seats):
-   ```bash
-   npm run db:init
-   ```
+## Tested end to end
+- Two different users competing for the same seat → second one correctly
+  blocked, in both Phase 1 and Phase 2
+- Redis holds correctly auto-expire if payment never happens
+- Bookings persist correctly in PostgreSQL even after restarting the server
 
-5. Start the server:
-   ```bash
-   npm run dev   # with nodemon, or: npm start
-   ```
+## Tech stack
+Node.js, Express, PostgreSQL, Redis, JWT auth.
 
-Server runs at `http://localhost:4000`.
+## What's next
+Phase 3 will add Kafka to decouple notifications/e-ticket generation from
+the booking flow itself.
 
-## API Reference
-
-### Auth
-- `POST /api/auth/register` — `{ name, email, password }` → `{ user, token }`
-- `POST /api/auth/login` — `{ email, password }` → `{ user, token }`
-
-### Events (public read, auth required to create)
-- `GET /api/events` — list events with available seat counts
-- `GET /api/events/:id` — get one event
-- `GET /api/events/:eventId/seats` — list seats + status for an event
-- `POST /api/events` — `{ name, venue, event_date, total_seats, price }` (requires `Authorization: Bearer <token>`)
-
-### Bookings (all require `Authorization: Bearer <token>`)
-- `POST /api/bookings` — `{ eventId, seatId }` → books the seat, mock-pays, returns booking
-- `GET /api/bookings/me` — list your bookings
-- `DELETE /api/bookings/:id` — cancel a booking, releases the seat
-
-## Testing the race condition (Phase 1 baseline)
-
-Register a user, grab a token, note a `seatId` from `GET /api/events/1/seats`,
-then fire two booking requests for the *same* seat at (almost) the same time:
-
+## Running it locally
 ```bash
-curl -X POST http://localhost:4000/api/bookings \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"eventId":1,"seatId":1}' &
-curl -X POST http://localhost:4000/api/bookings \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"eventId":1,"seatId":1}' &
-wait
+npm install
+createdb ticket_booking
+brew install redis && brew services start redis
+cp .env.example .env   # fill in DB + JWT + Redis config
+npm run db:init
+npm run dev
 ```
-
-One request returns `201` with a confirmed booking, the other returns `409
-seat unavailable`. No double booking. In Phase 2 this same test will show
-the difference in response latency once the lock moves to Redis.
-
-## Next phases
-- **Phase 2**: Redis atomic locking (`SETNX`/Lua) with TTL, acquired before
-  the DB write, replacing the `FOR UPDATE` row lock as the primary guard.
-- **Phase 3**: Kafka `booking.confirmed` event → consumers for email/SMS,
-  e-ticket generation, audit logging.
-- **Phase 4**: Deployment, architecture diagram, rate limiting, polish.
