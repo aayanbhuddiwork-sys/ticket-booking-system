@@ -34,25 +34,54 @@ Same guarantee as Phase 1 — no seat is ever double-booked — but the lock
 is grabbed and released fast, and the database is never touched until
 there's an actual confirmed sale.
 
+## Phase 3 — Kafka event pipeline
+
+Once a booking is confirmed, there's real work that has nothing to do with
+whether the seat is available — sending a confirmation email, generating
+a PDF ticket, writing an audit log. None of that needs to block the
+user's response.
+
+So instead of doing that work inside `confirmBooking` itself, the app now
+publishes one small event to Kafka — `booking.confirmed` — right after
+the database commit succeeds, then responds to the user immediately. It
+doesn't wait for anything else to happen.
+
+Three separate, independent processes listen for that event and react to
+it on their own: a notification consumer (mocked email), a ticket
+generation consumer (mocked PDF), and an audit-log consumer that actually
+writes a real row to Postgres. Each one runs as its own process — any of
+them could crash or restart without affecting the booking API at all.
+
 ## Tested end to end
 - Two different users competing for the same seat → second one correctly
   blocked, in both Phase 1 and Phase 2
 - Redis holds correctly auto-expire if payment never happens
 - Bookings persist correctly in PostgreSQL even after restarting the server
+- Ran the API and all three Kafka consumers as four separate processes at
+  once; confirmed a real booking and watched all three consumers react to
+  the same event independently, in parallel
+- Verified the audit-log consumer's write actually landed in Postgres by
+  querying the `audit_log` table directly
 
 ## Tech stack
-Node.js, Express, PostgreSQL, Redis, JWT auth.
+Node.js, Express, PostgreSQL, Redis, Kafka, JWT auth.
 
 ## What's next
-Phase 3 will add Kafka to decouple notifications/e-ticket generation from
-the booking flow itself.
+Phase 4: deployment, architecture diagram, rate limiting, polish.
 
 ## Running it locally
 ```bash
 npm install
 createdb ticket_booking
 brew install redis && brew services start redis
-cp .env.example .env   # fill in DB + JWT + Redis config
+brew install kafka && brew services start kafka
+cp .env.example .env   # fill in DB + JWT + Redis + Kafka config
 npm run db:init
 npm run dev
+
+# in separate terminals:
+npm run consumer:notify
+npm run consumer:ticket
+npm run consumer:audit
+```
 ```
