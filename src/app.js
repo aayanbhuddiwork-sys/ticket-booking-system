@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { generalLimiter } = require('./middleware/rateLimit');
 
 const authRoutes = require('./routes/auth.routes');
 const eventRoutes = require('./routes/events.routes');
@@ -9,6 +10,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(generalLimiter); // baseline rate limit on every route
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
