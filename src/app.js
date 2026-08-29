@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { generalLimiter } = require('./middleware/rateLimit');
+const { errorHandler } = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/auth.routes');
 const eventRoutes = require('./routes/events.routes');
@@ -23,10 +24,7 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Central error handler (catches anything thrown outside try/catch in controllers)
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+// Central error handler — see src/middleware/errorHandler.js
+app.use(errorHandler);
 
 module.exports = app;

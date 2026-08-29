@@ -1,4 +1,6 @@
 const pool = require('../config/db');
+const AppError = require('../utils/AppError');
+const { asyncHandler } = require('../middleware/errorHandler');
 
 async function createEvent(req, res) {
   try {
@@ -61,18 +63,17 @@ async function listEvents(req, res) {
   }
 }
 
-async function getEvent(req, res) {
-  try {
-    const { id } = req.params;
-    const { rows } = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-    res.json(rows[0]);
-  } catch (err) {
-    console.error('getEvent error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+// PHASE 4 example: rewritten with asyncHandler + AppError instead of a
+// manual try/catch. No try/catch needed here at all — asyncHandler
+// (wrapping this function in the router) automatically forwards any
+// thrown error, including this AppError, to the central error handler.
+const getEvent = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+  if (rows.length === 0) {
+    throw new AppError('Event not found', 404);
   }
-}
+  res.json(rows[0]);
+});
 
 module.exports = { createEvent, listEvents, getEvent };
