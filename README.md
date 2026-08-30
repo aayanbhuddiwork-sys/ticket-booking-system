@@ -85,3 +85,28 @@ npm run consumer:ticket
 npm run consumer:audit
 ```
 ```
+Live demo
+
+The API is deployed and publicly reachable: https://ticket-booking-system-0vdx.onrender.com
+
+This is a real backend API, not a website — there's no visual interface, so interacting with it means sending HTTP requests directly (curl, Postman, etc.), same as the examples below.
+
+bash
+# health check
+curl https://ticket-booking-system-0vdx.onrender.com/health
+
+# register a user
+curl -X POST https://ticket-booking-system-0vdx.onrender.com/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test","email":"test@example.com","password":"test1234"}'
+
+# see seats for the demo event
+curl https://ticket-booking-system-0vdx.onrender.com/api/events/1/seats
+
+Deployed on Render's free tier — the instance sleeps after periods of inactivity, so the first request after a while can take 20-30 seconds to wake it back up. Subsequent requests are fast.
+
+What's live vs. local-only
+
+Live in production: the core API, PostgreSQL row-level locking (Phase 1), and the Redis hold/confirm flow with rate limiting (Phase 2 and 4) — hosted on Neon (Postgres) and Upstash (Redis), both free tier.
+
+Local-only, by design: the Kafka pipeline (Phase 3). Kafka needs a persistently-running broker, which isn't something free-tier hosting supports well — running it there would mean paying for infrastructure just to keep a demo project's broker alive. Rather than do that, Kafka and its three consumers only run when the project is running locally (see the setup instructions above). In a real production deployment, this is exactly the kind of thing you'd point at a managed service like Confluent Cloud or AWS MSK instead of self-hosting a broker — deliberately keeping this project's own hosting free and simple was the right call here, not a limitation I didn't notice.
