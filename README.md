@@ -142,8 +142,8 @@ Node.js, Express, PostgreSQL, Redis, Kafka, JWT auth. Deployed on Render,
 Neon, and Upstash.
 
 ## What's next
-A frontend — right now the only way to interact with this is via curl or
-similar tools.
+This is currently an API-only project — no visual interface, only
+curl/Postman. A frontend is the natural next step.
 
 ## Running it locally
 ```bash
