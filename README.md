@@ -52,6 +52,31 @@ generation consumer (mocked PDF), and an audit-log consumer that actually
 writes a real row to Postgres. Each one runs as its own process — any of
 them could crash or restart without affecting the booking API at all.
 
+## Phase 4 — Rate limiting, error handling, and deployment
+
+With the core system working, this phase made it genuinely production-
+minded rather than just "correct."
+
+**Rate limiting**, backed by Redis rather than in-memory storage — so the
+limit is shared across every instance of the app, not just whichever
+server happened to handle a given request. A loose baseline (100
+requests/minute) applies everywhere; a stricter limit protects
+`/auth/login` and `/auth/register` against brute-force attempts, and
+another protects `/bookings/hold` specifically, since that's the exact
+endpoint someone would script or spam during a real flash sale.
+
+**Centralized error handling** — a custom `AppError` class for
+deliberate, expected errors ("seat not found") versus genuine unexpected
+bugs, wired through an `asyncHandler` wrapper so controllers don't need
+manual try/catch blocks. One central handler decides every error
+response: operational errors return their real message and status code,
+but anything unexpected is logged in full on the server while the client
+only ever sees a generic message — never a leaked stack trace or raw SQL
+error in production.
+
+**Deployment** — the API is genuinely live, not just running locally (see
+below).
+
 ## Tested end to end
 - Two different users competing for the same seat → second one correctly
   blocked, in both Phase 1 and Phase 2
@@ -62,12 +87,63 @@ them could crash or restart without affecting the booking API at all.
   the same event independently, in parallel
 - Verified the audit-log consumer's write actually landed in Postgres by
   querying the `audit_log` table directly
+- Fired 12 rapid login attempts and confirmed the rate limiter correctly
+  started rejecting requests partway through with `429`
+- Requested a nonexistent event and confirmed the centralized error
+  handler returned a clean `404` via the `AppError` path
+- **Full live deployment**, tested end to end against the real public
+  URL: registration, seat listing, and a complete hold → confirm booking
+  flow, all using hosted Postgres and Redis over the real internet
+
+## Live demo
+
+The API is deployed and publicly reachable: **https://ticket-booking-system-0vdx.onrender.com**
+
+This is a real backend API, not a website — there's no visual interface,
+so interacting with it means sending HTTP requests directly (curl,
+Postman, etc.), same as the examples below.
+
+```bash
+# health check
+curl https://ticket-booking-system-0vdx.onrender.com/health
+
+# register a user
+curl -X POST https://ticket-booking-system-0vdx.onrender.com/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test","email":"test@example.com","password":"test1234"}'
+
+# see seats for the demo event
+curl https://ticket-booking-system-0vdx.onrender.com/api/events/1/seats
+```
+
+Deployed on Render's free tier — the instance sleeps after periods of
+inactivity, so the first request after a while can take 20-30 seconds to
+wake it back up. Subsequent requests are fast.
+
+### What's live vs. local-only
+
+**Live in production:** the core API, PostgreSQL row-level locking (Phase
+1), and the Redis hold/confirm flow with rate limiting (Phase 2 and 4) —
+hosted on Neon (Postgres) and Upstash (Redis), both free tier.
+
+**Local-only, by design:** the Kafka pipeline (Phase 3). Kafka needs a
+persistently-running broker, which isn't something free-tier hosting
+supports well — running it there would mean paying for infrastructure
+just to keep a demo project's broker alive. Rather than do that, Kafka
+and its three consumers only run when the project is running locally
+(see the setup instructions below). In a real production deployment,
+this is exactly the kind of thing you'd point at a managed service like
+Confluent Cloud or AWS MSK instead of self-hosting a broker — deliberately
+keeping this project's own hosting free and simple was the right call
+here, not a limitation I didn't notice.
 
 ## Tech stack
-Node.js, Express, PostgreSQL, Redis, Kafka, JWT auth.
+Node.js, Express, PostgreSQL, Redis, Kafka, JWT auth. Deployed on Render,
+Neon, and Upstash.
 
 ## What's next
-Phase 4: deployment, architecture diagram, rate limiting, polish.
+A frontend — right now the only way to interact with this is via curl or
+similar tools.
 
 ## Running it locally
 ```bash
@@ -84,29 +160,3 @@ npm run consumer:notify
 npm run consumer:ticket
 npm run consumer:audit
 ```
-```
-Live demo
-
-The API is deployed and publicly reachable: https://ticket-booking-system-0vdx.onrender.com
-
-This is a real backend API, not a website — there's no visual interface, so interacting with it means sending HTTP requests directly (curl, Postman, etc.), same as the examples below.
-
-bash
-# health check
-curl https://ticket-booking-system-0vdx.onrender.com/health
-
-# register a user
-curl -X POST https://ticket-booking-system-0vdx.onrender.com/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Test","email":"test@example.com","password":"test1234"}'
-
-# see seats for the demo event
-curl https://ticket-booking-system-0vdx.onrender.com/api/events/1/seats
-
-Deployed on Render's free tier — the instance sleeps after periods of inactivity, so the first request after a while can take 20-30 seconds to wake it back up. Subsequent requests are fast.
-
-What's live vs. local-only
-
-Live in production: the core API, PostgreSQL row-level locking (Phase 1), and the Redis hold/confirm flow with rate limiting (Phase 2 and 4) — hosted on Neon (Postgres) and Upstash (Redis), both free tier.
-
-Local-only, by design: the Kafka pipeline (Phase 3). Kafka needs a persistently-running broker, which isn't something free-tier hosting supports well — running it there would mean paying for infrastructure just to keep a demo project's broker alive. Rather than do that, Kafka and its three consumers only run when the project is running locally (see the setup instructions above). In a real production deployment, this is exactly the kind of thing you'd point at a managed service like Confluent Cloud or AWS MSK instead of self-hosting a broker — deliberately keeping this project's own hosting free and simple was the right call here, not a limitation I didn't notice.
